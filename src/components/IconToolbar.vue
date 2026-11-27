@@ -24,10 +24,7 @@ type ToolbarEvent =
   | 'copy'
   | 'paste'
   | 'clear'
-  | 'quicklook'
-  | 'layout'
   | 'prefs'
-  | 'help'
 
 type Item = {
   label: string
@@ -56,18 +53,13 @@ const emit = defineEmits<{
   copy: []
   paste: []
   clear: []
-  quicklook: []
-  layout: []
   prefs: []
-  help: []
   menu: [id: string, itemId: string]
 }>()
 
 const menus: Record<string, MenuItem[]> = {
   export: [
-    { id: 'folder', label: 'Export to Folder…' },
-    { id: 'text', label: 'Export Tags to Text File…', disabled: true },
-    { id: 'csv', label: 'Export to CSV…', disabled: true },
+    { id: 'folder', label: 'Export Artwork to Folder…' },
   ],
   load: [
     { id: 'file', label: 'Load Tags from File…' },
@@ -90,10 +82,6 @@ const menus: Record<string, MenuItem[]> = {
   rename: [
     { id: 'pattern', label: 'Rename Files…' },
     { id: 'preview', label: 'Preview Rename', disabled: true },
-  ],
-  layout: [
-    { id: 'manage', label: 'Manage Layouts…' },
-    { id: 'save', label: 'Save Layout…', disabled: true },
   ],
 }
 
@@ -211,28 +199,12 @@ const items: Item[] = [
     disabled: (p) => !p.hasSelection,
   },
   {
-    label: 'Quick Look',
-    icon: 'QuickLook',
-    action: 'quicklook',
-    widthPx: 76,
-    disabled: (p) => !p.hasSelection,
-  },
-  {
-    label: 'Layout',
-    icon: 'ColumnLayout',
-    action: 'menu',
-    menuId: 'layout',
-    widthPx: 54,
-    sepBefore: true,
-  },
-  {
     label: 'Customize',
     icon: 'Appearance',
     action: 'prefs',
     widthPx: 74,
     sepBefore: true,
   },
-  { label: 'Help', icon: 'Help', title: 'Help', action: 'help', widthPx: 44 },
 ]
 
 const iconUrl = (name: string) => `/icons/${name}.png`
@@ -297,17 +269,8 @@ const fire = (action: ToolbarEvent) => {
     case 'clear':
       emit('clear')
       break
-    case 'quicklook':
-      emit('quicklook')
-      break
-    case 'layout':
-      emit('layout')
-      break
     case 'prefs':
       emit('prefs')
-      break
-    case 'help':
-      emit('help')
       break
     default: {
       const _exhaustive: never = action
@@ -340,7 +303,7 @@ const onMenuPick = (itemId: string) => {
       <span v-if="item.sepBefore" class="sep" aria-hidden="true" />
       <ToolbarDisc
         class="tb-menu"
-        :class="{ 'menu-open': menuOpen === item.menuId, 'tb-quick': item.label === 'Quick Look' }"
+        :class="{ 'menu-open': menuOpen === item.menuId }"
         :label="item.label"
         :title="item.title ?? item.label"
         :width-px="item.widthPx"
@@ -392,10 +355,5 @@ const onMenuPick = (itemId: string) => {
 }
 .menu-open :deep(.glyph-wrap) {
   background: radial-gradient(circle at 38% 32%, #7a7a7a 0%, #555 52%, #484848 100%);
-}
-:deep(.tb-quick .lb) {
-  font-size: 9px;
-  line-height: 1.05;
-  white-space: normal;
 }
 </style>

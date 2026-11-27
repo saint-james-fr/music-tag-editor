@@ -7,7 +7,6 @@ const props = defineProps<{
   col: ColumnId
   rows: TrackRow[]
   pattern: string
-  genreOptions: string[]
 }>()
 
 const emit = defineEmits<{
@@ -58,20 +57,6 @@ const title = computed(() =>
         <div class="actions">
           <button type="button" @click="emit('previewPattern', localPattern)">Preview</button>
           <button type="button" class="primary" @click="emit('applyPattern', localPattern)">Apply</button>
-          <button type="button" @click="emit('close')">Done</button>
-        </div>
-      </template>
-
-      <template v-else-if="col === 'genre' && genreOptions.length">
-        <p class="hint">Set genre for selection</p>
-        <select v-model="fieldValue" class="field">
-          <option value="">—</option>
-          <option v-for="g in genreOptions" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <div class="actions">
-          <button type="button" class="primary" :disabled="!fieldValue" @click="emit('applyField', fieldValue)">
-            Apply
-          </button>
           <button type="button" @click="emit('close')">Done</button>
         </div>
       </template>

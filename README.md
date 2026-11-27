@@ -6,6 +6,8 @@ Desktop batch music tag editor. Open a folder, edit tags in a spreadsheet grid, 
 
 Built with **Tauri 2**, **Vue 3**, and [lofty](https://github.com/Serial-ATA/lofty-rs) (MP3, FLAC, M4A, WAV, AIFF, OGG, Opus, and more).
 
+![Tag Editor screenshot](assets/screenshot.jpg)
+
 ## Run
 
 ```bash
@@ -30,5 +32,5 @@ Rename tokens: `{{tracknumber}}`, `{{title}}`, `{{artist}}`, `{{album}}`, `{{gen
 
 - Artwork column + popover (replace, delete, export) — **Save** writes embedded art
 - Tabs — multiple lists per window; session restores paths
-- Layout — hide / reorder / resize columns; named layouts
-- Prefs — rename pattern, track padding, genre list, confirmations
+- Resizable columns that fill the window width
+- Prefs — rename pattern, track padding, confirmations

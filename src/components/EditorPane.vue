@@ -4,6 +4,7 @@ import { useFileDrop } from '../composables/useFileDrop'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
+import { parseColWidth } from '../column-width'
 import { startColumnResize } from '../composables/useColumnResize'
 import { usePrefs } from '../prefs'
 import type { EditorTab } from '../tabs'
@@ -26,11 +27,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   status: [string]
-  'update:showLayout': [boolean]
   'update:showPrefs': [boolean]
 }>()
 
-const { prefs, visibleColumns, listForColumn, setColumnWidth } = usePrefs()
+const { prefs, visibleColumns, setColumnWidth } = usePrefs()
 
 const busy = ref(false)
 const filterEnabled = ref(true)
@@ -59,9 +59,14 @@ const renamePattern = computed({
 })
 
 const ROW_INDEX_W = 50
-const gridTemplate = computed(
-  () => `${ROW_INDEX_W}px ${visibleColumns.value.map((c) => c.width).join(' ')}`,
-)
+const gridTemplate = computed(() => {
+  const cols = visibleColumns.value.map((c) => {
+    const px = parseColWidth(c.width)
+    if (c.key === 'artwork') return `${px}px`
+    return `minmax(${px}px, 1fr)`
+  })
+  return `${ROW_INDEX_W}px ${cols.join(' ')}`
+})
 
 const cellValue = (row: TrackRow, key: ColumnId) => {
   if (key === 'artwork') return row.hasArtwork ? '1' : ''
@@ -536,9 +541,6 @@ const onPaneKeydown = (e: KeyboardEvent) => {
   else if (tab) moveActiveCell(0, e.shiftKey ? -1 : 1, false)
 }
 
-const showCellAccessory = (row: TrackRow, col: ColumnId) =>
-  col !== 'artwork' && col !== 'tagFormat' && isFocused(row, col)
-
 const colMeta = (key: ColumnId) => COLUMN_META.find((m) => m.key === key)
 const colAlign = (key: ColumnId) => colMeta(key)?.align ?? 'left'
 const isReadonlyCol = (key: ColumnId) => !!colMeta(key)?.readonly
@@ -686,9 +688,6 @@ const onToolbarMenu = (menuId: string, itemId: string) => {
     case 'rename':
       if (itemId === 'pattern') showRename.value = true
       break
-    case 'layout':
-      if (itemId === 'manage') emit('update:showLayout', true)
-      break
     default:
       break
   }
@@ -799,10 +798,7 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
       @copy="copyCells"
       @paste="pasteCells"
       @clear="clearCells"
-      @quicklook="emit('status', 'Quick Look — pas encore implémenté.')"
-      @layout="emit('update:showLayout', true)"
       @prefs="emit('update:showPrefs', true)"
-      @help="emit('status', 'Help — Open a folder to edit tags.')"
       @menu="onToolbarMenu"
     />
 
@@ -897,7 +893,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
               v-else
               class="cell-wrap"
               :class="{
-                'has-acc': showCellAccessory(row, col.key),
                 'cell-sel': isCellSelected(ri, col.key),
                 [`align-${colAlign(col.key)}`]: true,
               }"
@@ -914,14 +909,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                   pending: col.key === 'fileName' && row.pendingName,
                   'cell-sel': isCellSelected(ri, col.key),
                 }"
-                :title="
-                  col.key === 'tagFormat'
-                    ? TAG_FORMAT_HINTS[cellValue(row, col.key) || DEFAULT_TAG_FORMAT] ??
-                      cellValue(row, col.key)
-                    : col.key === 'fileName'
-                      ? cellValue(row, col.key)
-                      : undefined
-                "
                 tabindex="0"
                 @focus="setFocus(row, col.key, ri)"
                 @click="
@@ -936,20 +923,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                 }}
               </div>
               <input
-                v-else-if="listForColumn(col.key).length"
-                class="cell"
-                :data-col="col.key"
-                :class="{
-                  focus: isFocused(row, col.key),
-                  dirty: row.dirty,
-                  'cell-sel': isCellSelected(ri, col.key),
-                }"
-                :value="row[col.key as ColumnKey]"
-                :list="`list-${col.key}`"
-                @focus="setFocus(row, col.key, ri)"
-                @input="onCellInput(row, col.key as ColumnKey, ($event.target as HTMLInputElement).value)"
-              />
-              <input
                 v-else
                 class="cell"
                 :data-col="col.key"
@@ -961,29 +934,11 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                 @focus="setFocus(row, col.key, ri)"
                 @input="onCellInput(row, col.key as ColumnKey, ($event.target as HTMLInputElement).value)"
               />
-              <button
-                v-if="showCellAccessory(row, col.key)"
-                type="button"
-                class="cell-acc"
-                title="Compose…"
-                @mousedown.stop
-                @click.stop="openCompose(row, col.key)"
-              >
-                …
-              </button>
             </div>
           </template>
         </div>
       </div>
     </div>
-
-    <datalist
-      v-for="col in visibleColumns.filter((c) => listForColumn(c.key).length)"
-      :id="`list-${col.key}`"
-      :key="col.key"
-    >
-      <option v-for="item in listForColumn(col.key)" :key="item" :value="item" />
-    </datalist>
 
     <RenamePopover
       v-if="showRename"
@@ -1008,7 +963,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
       :col="composeOpen.col"
       :rows="composeOpen.rows"
       :pattern="renamePattern"
-      :genre-options="listForColumn('genre')"
       @close="composeOpen = null"
       @apply-field="onComposeField"
       @preview-pattern="onComposePreview"
@@ -1209,11 +1163,15 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
   background: var(--te-bg-grid, #2e2e2e);
 }
 .sheet {
-  min-width: max-content;
+  width: 100%;
+  min-width: 100%;
+  box-sizing: border-box;
 }
 .grid {
   display: grid;
+  width: 100%;
   align-items: stretch;
+  box-sizing: border-box;
 }
 .grid.head {
   position: sticky;
@@ -1246,28 +1204,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
 .cell-wrap.align-center .cell,
 .head-cell.align-center {
   text-align: center;
-}
-.cell-acc {
-  position: absolute;
-  right: 2px;
-  bottom: 1px;
-  width: 16px;
-  height: 14px;
-  padding: 0;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 11px;
-  letter-spacing: -0.08em;
-  border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(48, 48, 48, 0.95);
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  opacity: 0;
-  z-index: 2;
-}
-.cell-wrap.has-acc .cell-acc {
-  opacity: 1;
 }
 .cell {
   padding: 1px 6px;

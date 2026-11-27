@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import EditorPane from './components/EditorPane.vue'
-import LayoutModal from './components/LayoutModal.vue'
 import PrefsModal from './components/PrefsModal.vue'
 import { DEMO_TRACKS, shouldLoadDemo } from './demo-tracks'
 import { useTabs } from './tabs'
@@ -9,7 +8,6 @@ import { useTabs } from './tabs'
 const { tabs, activeTabId, activeTab, addTab, closeTab } = useTabs()
 const status = ref('Glissez des fichiers audio ou utilisez Open.')
 const showPrefs = ref(false)
-const showLayout = ref(false)
 const tab = computed(() => activeTab())
 
 const onStatus = (msg: string) => {
@@ -54,7 +52,6 @@ onMounted(async () => {
       :key="tab.id"
       :tab="tab"
       @status="onStatus"
-      @update:show-layout="showLayout = $event"
       @update:show-prefs="showPrefs = $event"
     />
 
@@ -64,7 +61,6 @@ onMounted(async () => {
     </footer>
 
     <PrefsModal :open="showPrefs" @close="showPrefs = false" />
-    <LayoutModal :open="showLayout" @close="showLayout = false" />
   </div>
 </template>
 

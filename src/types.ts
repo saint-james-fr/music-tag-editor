@@ -35,21 +35,11 @@ export type ColumnKey = keyof Pick<
 
 export type ColumnId = ColumnKey | 'artwork'
 
-export const DEFAULT_GENRE_LIST = [
-  'Deep House',
-  'House',
-  'Techno',
-  'Electronic',
-  'Ambient',
-  'Downtempo',
-]
-
 /** Default column widths. */
 export const COLUMN_META: {
   key: ColumnId
   label: string
   defaultWidth: string
-  list?: boolean
   align?: 'left' | 'center'
   readonly?: boolean
 }[] = [
@@ -57,7 +47,7 @@ export const COLUMN_META: {
   { key: 'title', label: 'Title', defaultWidth: '127px' },
   { key: 'artist', label: 'Artist', defaultWidth: '114px' },
   { key: 'album', label: 'Album', defaultWidth: '134px' },
-  { key: 'genre', label: 'Genre', defaultWidth: '109px', list: true },
+  { key: 'genre', label: 'Genre', defaultWidth: '109px' },
   { key: 'year', label: 'Year', defaultWidth: '65px', align: 'center' },
   { key: 'albumArtist', label: 'Album Artist', defaultWidth: '105px' },
   { key: 'trackNumber', label: 'Track #', defaultWidth: '75px', align: 'center' },
