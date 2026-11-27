@@ -1,9 +1,18 @@
 # Dependencies & build
 node_modules
+.venv/
 dist
 dist-ssr
 tmp/
 assets/export/
+src-tauri/target/
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.exe
+*.app
 
 # Env (keep examples)
 .env

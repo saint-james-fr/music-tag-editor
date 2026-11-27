@@ -2,10 +2,84 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
 
 jobs:
-  publish-tauri:
+  bump:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          VERSION=$(node <<'EOF'
+          const fs = require('fs')
+          const bump = process.env.BUMP
+          const pkgPath = 'package.json'
+          const confPath = 'src-tauri/tauri.conf.json'
+          const cargoPath = 'src-tauri/Cargo.toml'
+
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          let [major, minor, patch] = pkg.version.split('.').map(Number)
+          if (bump === 'major') {
+            major += 1
+            minor = 0
+            patch = 0
+          } else if (bump === 'minor') {
+            minor += 1
+            patch = 0
+          } else {
+            patch += 1
+          }
+          const version = `${major}.${minor}.${patch}`
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'))
+          conf.version = version
+          fs.writeFileSync(confPath, `${JSON.stringify(conf, null, 2)}\n`)
+
+          let cargo = fs.readFileSync(cargoPath, 'utf8')
+          cargo = cargo.replace(/^version = "[^"]+"/m, `version = "${version}"`)
+          fs.writeFileSync(cargoPath, cargo)
+
+          process.stdout.write(version)
+          EOF
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped to $VERSION ($BUMP)"
+
+      - name: Commit and push
+        id: push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "Release v${{ steps.bump.outputs.version }}"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish-tauri:
+    needs: bump
     permissions:
       contents: write
     strategy:
@@ -24,6 +98,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
 
       - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -55,8 +131,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
-          releaseName: 'Tag Editor v__VERSION__'
+          releaseName: 'Music Tag Editor v__VERSION__'
           releaseBody: 'See the assets to download and install.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

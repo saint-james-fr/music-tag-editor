@@ -1,66 +1,64 @@
-# <img src="assets/app-icon-source.jpg" width="64" height="64" alt="" align="left" /> Tag Editor
+<p align="center">
+  <img src="assets/app-icon.png" width="160" height="160" alt="Music Tag Editor">
+</p>
 
-&nbsp;
+<h1 align="center">Music Tag Editor</h1>
 
-Desktop batch music tag editor. Open a folder, edit tags in a spreadsheet grid, save, and rename from a pattern.
+<p align="center">
+  Fix messy music tags without the headache.<br>
+  Drop in a folder, edit like a spreadsheet, save, rename — done.
+</p>
 
-Built with **Tauri 2**, **Vue 3**, and [lofty](https://github.com/Serial-ATA/lofty-rs) (MP3, FLAC, M4A, WAV, AIFF, OGG, Opus, and more).
+<p align="center">
+  <a href="https://github.com/saint-james-fr/music-tag-editor/releases/latest"><img src="https://img.shields.io/github/v/release/saint-james-fr/music-tag-editor?style=flat-square&label=download&color=2ea44f" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/saint-james-fr/music-tag-editor?style=flat-square" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="Platforms">
+  <img src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
+</p>
 
-![Tag Editor screenshot](assets/screenshot.jpg)
+<p align="center">
+  <a href="https://github.com/saint-james-fr/music-tag-editor/releases/latest"><strong>Download</strong></a>
+  · macOS · Windows · Linux
+</p>
 
-## Run (dev)
+<p align="center">
+  <img src="assets/screenshot.jpg" width="900" alt="Music Tag Editor screenshot">
+</p>
+
+Artwork, bulk edits, rename patterns, multiple tabs.  
+Works with MP3, FLAC, M4A, WAV, and friends ([lofty](https://github.com/Serial-ATA/lofty-rs) · Tauri · Vue).
+
+## Download
+
+Grab the latest build from **[Releases](https://github.com/saint-james-fr/music-tag-editor/releases/latest)**.
+
+Builds aren’t code-signed yet, so the OS may complain on first open:
+
+- **macOS** — right-click → **Open**, or Privacy & Security → **Open Anyway**. Still stuck? `xattr -cr "/Applications/Music Tag Editor.app"`
+- **Windows** — SmartScreen → **More info** → **Run anyway**
+- **Linux** — `chmod +x` the AppImage, then run it
+
+## Quick tips
+
+- Yellow bar = unsaved changes
+- Double-click a column header to fill down
+- Rename with `{{tracknumber}}`, `{{title}}`, `{{artist}}`, `{{album}}`, …
+
+## Develop
 
 ```bash
 yarn install
 yarn tauri dev
 ```
 
-## Build from source
+Build: `yarn tauri build` → installers in `src-tauri/target/release/bundle/`.  
+Needs [Node](https://nodejs.org/) + yarn, [Rust](https://rustup.rs/), and [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-Needs [Node.js](https://nodejs.org/) (with yarn), [Rust](https://rustup.rs/), and platform webview deps ([Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)).
+Ship a release: GitHub → **Actions** → **Release** → pick patch / minor / major.
 
-```bash
-yarn install
-yarn tauri build
-```
+## Contributing
 
-Installers land in `src-tauri/target/release/bundle/` (`.app` / `.dmg` on macOS, `.msi` / `.exe` on Windows, `.deb` / `.AppImage` on Linux).
-
-## Install (unsigned builds)
-
-Release binaries are **not code-signed**. OSes will warn on first open:
-
-| OS | What to do |
-|----|------------|
-| **macOS** | Right-click the app → **Open** → **Open**. Or: System Settings → Privacy & Security → **Open Anyway**. If Gatekeeper still blocks: `xattr -cr "/Applications/Tag Editor.app"` |
-| **Windows** | SmartScreen → **More info** → **Run anyway** |
-| **Linux** | `chmod +x` the AppImage, then run it |
-
-## Release
-
-1. Bump `version` in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, then push to `main`.
-2. GitHub → **Actions** → **Release** → **Run workflow** (main only).
-3. Builds macOS (arm64 + x64), Linux, and Windows; creates draft tag `vX.Y.Z` with installers attached — publish the draft when ready.
-
-## Usage
-
-| Action | How |
-|--------|-----|
-| **Open** | Folder → all audio files recursively |
-| **Import** | Add more files to the current list |
-| **Edit** | Click cells; yellow bar = unsaved |
-| **Bulk** | Check rows, or double-click a column header to copy the first visible value down |
-| **Save** | Writes tags for dirty rows |
-| **Rename** | Set pattern → **Preview** → **Rename** |
-
-Rename tokens: `{{tracknumber}}`, `{{title}}`, `{{artist}}`, `{{album}}`, `{{genre}}`, `{{year}}`, `{{albumartist}}`, `{{filename}}`.
-
-## Features
-
-- Artwork column + popover (replace, delete, export) — **Save** writes embedded art
-- Tabs — multiple lists per window; session restores paths
-- Resizable columns that fill the window width
-- Prefs — rename pattern, track padding, confirmations
+Issues and PRs welcome — keep them small and focused. Bug reports with a short “what I did / what I expected” go a long way.
 
 ## License
 

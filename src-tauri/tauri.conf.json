@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tag Editor",
+  "productName": "Music Tag Editor",
   "version": "0.1.0",
-  "identifier": "com.maxencerobinet.tauri-app",
+  "identifier": "com.maxencerobinet.music-tag-editor",
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Tag Editor",
+        "title": "Music Tag Editor",
         "width": 1280,
         "height": 760,
         "dragDropEnabled": true,

@@ -152,7 +152,7 @@ const artPendingCount = computed(() => artworkPending.value.length)
 const windowTitle = computed(() => {
   const n = props.tab.tracks.length
   if (props.tab.folderLabel) return `${props.tab.folderLabel.toUpperCase()} (${n} files)`
-  return n ? `Tag Editor (${n} files)` : 'Tag Editor'
+  return n ? `Music Tag Editor (${n} files)` : 'Music Tag Editor'
 })
 
 watch(
