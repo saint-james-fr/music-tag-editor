@@ -1,6 +1,6 @@
 [package]
 name = "music-tag-editor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Batch music tag editor"
 authors = ["maxencerobinet"]
 license = "MIT"
