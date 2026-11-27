@@ -28,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   status: [string]
   'update:showPrefs': [boolean]
+  'update:showLogs': [boolean]
 }>()
 
 const { prefs, visibleColumns, setColumnWidth } = usePrefs()
@@ -43,6 +44,8 @@ const artPreview = ref<ArtworkPayload | null>(null)
 const showRename = ref(false)
 const dropActive = ref(false)
 const focusCell = ref<{ rowId: string; col: ColumnId } | null>(null)
+/** Excel: first click selects; second click (or typing/F2) edits. */
+const editing = ref(false)
 const composeOpen = ref<{ col: ColumnId; rows: TrackRow[] } | null>(null)
 const tagFormatMenu = ref<{ x: number; y: number; current: string; rows: TrackRow[] } | null>(null)
 const sortKey = ref<ColumnId | 'num'>('fileName')
@@ -334,6 +337,7 @@ const fillColumn = (key: ColumnId) => {
 /** Index column = Excel row header (full row). */
 const selectRowHeader = (ri: number, e: MouseEvent) => {
   e.preventDefault()
+  editing.value = false
   const last = Math.max(0, visibleColumns.value.length - 1)
   if (e.shiftKey && rangeAnchor.value) {
     rangeEnd.value = { ri, ci: last }
@@ -379,6 +383,8 @@ const setFocus = (row: TrackRow, col: ColumnId, rowIndex?: number) => {
 
 const onCellMouseDown = (row: TrackRow, ri: number, col: ColumnId, e: MouseEvent) => {
   if (e.shiftKey || e.metaKey || e.ctrlKey) e.preventDefault()
+  const second =
+    isFocused(row, col) && !e.shiftKey && !e.metaKey && !e.ctrlKey
   // Keep multi-select when opening Tag Format inside the selection
   if (
     col === 'tagFormat' &&
@@ -391,11 +397,54 @@ const onCellMouseDown = (row: TrackRow, ri: number, col: ColumnId, e: MouseEvent
     focusCell.value = { rowId: row.id, col }
     return
   }
+  if (!second) editing.value = false
   selectCellAt(ri, col, e)
+}
+
+const pendingSecondClick = ref(false)
+
+const onCellMouseDownSelect = (row: TrackRow, ri: number, col: ColumnId, e: MouseEvent) => {
+  pendingSecondClick.value =
+    isFocused(row, col) && !editing.value && !e.shiftKey && !e.metaKey && !e.ctrlKey
+  onCellMouseDown(row, ri, col, e)
+}
+
+/** Second click on the focused cell: edit / open artwork / tag-format menu. */
+const onCellClick = (row: TrackRow, _ri: number, col: ColumnId, e: MouseEvent) => {
+  if (e.shiftKey || e.metaKey || e.ctrlKey) return
+  if (!pendingSecondClick.value) return
+  pendingSecondClick.value = false
+  if (col === 'artwork') void openArtwork(row)
+  else if (col === 'tagFormat') openTagFormatMenu(row, e)
+  else if (isEditableCol(col)) void beginEdit(true)
 }
 
 const isFocused = (row: TrackRow, col: ColumnId) =>
   focusCell.value?.rowId === row.id && focusCell.value?.col === col
+
+const isEditableCol = (key: ColumnId) =>
+  key !== 'artwork' && key !== 'fileName' && !isReadonlyCol(key)
+
+const isEditingCell = (row: TrackRow, col: ColumnId) =>
+  editing.value && isFocused(row, col)
+
+const beginEdit = async (selectAll = true) => {
+  if (!focusCell.value || !isEditableCol(focusCell.value.col)) return
+  editing.value = true
+  await nextTick()
+  const ri = filtered.value.findIndex((r) => r.id === focusCell.value!.rowId)
+  if (ri < 0) return
+  const el = document.querySelector(
+    `.sheet .grid.row[data-ri="${ri}"] input.cell[data-col="${CSS.escape(focusCell.value.col)}"]`,
+  ) as HTMLInputElement | null
+  el?.focus({ preventScroll: false })
+  if (selectAll) el?.select()
+  else if (el) el.setSelectionRange(el.value.length, el.value.length)
+}
+
+const endEdit = () => {
+  editing.value = false
+}
 
 const composeTargets = (row: TrackRow) =>
   selectedRows.value.length > 1 ? selectedRows.value : [row]
@@ -458,8 +507,14 @@ const cutCells = async () => {
 
 const hasTextSelection = () => {
   const el = document.activeElement
-  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false
-  return el.selectionStart !== el.selectionEnd
+  if (
+    (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+    el.selectionStart !== el.selectionEnd
+  ) {
+    return true
+  }
+  const sel = window.getSelection()
+  return !!sel && !sel.isCollapsed && sel.toString().length > 0
 }
 
 const caretAtInputEdge = (dir: 'left' | 'right') => {
@@ -505,8 +560,17 @@ const moveActiveCell = (dri: number, dci: number, extend: boolean) => {
     rangeAnchor.value = { ri: nri, ci: nci }
     rangeEnd.value = { ri: nri, ci: nci }
   }
+  editing.value = false
   focusCell.value = { rowId: rows[nri].id, col }
   void focusDomCell(nri, col)
+}
+
+const inNonCellField = () => {
+  const ae = document.activeElement
+  return (
+    (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) &&
+    !ae.classList.contains('cell')
+  )
 }
 
 const onPaneKeydown = (e: KeyboardEvent) => {
@@ -525,13 +589,61 @@ const onPaneKeydown = (e: KeyboardEvent) => {
     return
   }
 
+  if (inNonCellField()) return
+
+  if (e.key === 'Escape' && editing.value) {
+    e.preventDefault()
+    endEdit()
+    if (focusCell.value) {
+      const ri = filtered.value.findIndex((r) => r.id === focusCell.value!.rowId)
+      if (ri >= 0) void focusDomCell(ri, focusCell.value.col)
+    }
+    return
+  }
+
+  if (
+    focusCell.value &&
+    !editing.value &&
+    (e.key === 'F2' || e.key === 'Enter') &&
+    isEditableCol(focusCell.value.col)
+  ) {
+    e.preventDefault()
+    void beginEdit(e.key === 'F2' ? false : true)
+    return
+  }
+
+  if (e.key === 'Enter' && editing.value) {
+    e.preventDefault()
+    endEdit()
+    moveActiveCell(1, 0, false)
+    return
+  }
+
+  // Typing while selected starts edit (replaces cell).
+  if (
+    focusCell.value &&
+    !editing.value &&
+    !e.altKey &&
+    e.key.length === 1 &&
+    isEditableCol(focusCell.value.col)
+  ) {
+    e.preventDefault()
+    const row = props.tab.tracks.find((t) => t.id === focusCell.value!.rowId)
+    if (!row) return
+    onCellInput(row, focusCell.value.col as ColumnKey, e.key)
+    void beginEdit(false)
+    return
+  }
+
   const arrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight'
   const tab = e.key === 'Tab'
   if (!arrow && !tab) return
   if (!focusCell.value && !rangeEnd.value) return
 
-  if (e.key === 'ArrowLeft' && !caretAtInputEdge('left')) return
-  if (e.key === 'ArrowRight' && !caretAtInputEdge('right')) return
+  if (editing.value) {
+    if (e.key === 'ArrowLeft' && !caretAtInputEdge('left')) return
+    if (e.key === 'ArrowRight' && !caretAtInputEdge('right')) return
+  }
 
   e.preventDefault()
   if (e.key === 'ArrowUp') moveActiveCell(-1, 0, e.shiftKey)
@@ -540,6 +652,9 @@ const onPaneKeydown = (e: KeyboardEvent) => {
   else if (e.key === 'ArrowRight') moveActiveCell(0, 1, e.shiftKey)
   else if (tab) moveActiveCell(0, e.shiftKey ? -1 : 1, false)
 }
+
+const showCellAccessory = (row: TrackRow, col: ColumnId) =>
+  col !== 'artwork' && col !== 'tagFormat' && isFocused(row, col)
 
 const colMeta = (key: ColumnId) => COLUMN_META.find((m) => m.key === key)
 const colAlign = (key: ColumnId) => colMeta(key)?.align ?? 'left'
@@ -671,6 +786,7 @@ const onToolbarMenu = (menuId: string, itemId: string) => {
       break
     case 'action':
       if (itemId === 'prefs') emit('update:showPrefs', true)
+      if (itemId === 'log') emit('update:showLogs', true)
       if (
         itemId === 'compose' &&
         selectedRows.value.length &&
@@ -834,7 +950,17 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
       </div>
     </div>
 
-    <div class="grid-wrap" @mousedown="(e) => (e.target === e.currentTarget ? (focusCell = null) : null)">
+    <div
+      class="grid-wrap"
+      @mousedown="
+        (e) => {
+          if (e.target === e.currentTarget) {
+            focusCell = null
+            editing = false
+          }
+        }
+      "
+    >
       <div class="sheet">
         <div class="grid head scroll-edge-under" :style="{ gridTemplateColumns: gridTemplate }">
           <div class="cell idx head-idx" />
@@ -883,8 +1009,8 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                 focus: isFocused(row, col.key),
                 'cell-sel': isCellSelected(ri, col.key),
               }"
-              @mousedown="onCellMouseDown(row, ri, col.key, $event)"
-              @click="setFocus(row, col.key, ri); openArtwork(row)"
+              @mousedown="onCellMouseDownSelect(row, ri, col.key, $event)"
+              @click="onCellClick(row, ri, col.key, $event)"
             >
               <img v-if="thumbCache[row.path]" :src="thumbCache[row.path]" alt="" />
               <span v-else class="art-ph">{{ row.hasArtwork ? '♪' : '' }}</span>
@@ -893,13 +1019,28 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
               v-else
               class="cell-wrap"
               :class="{
+                'has-acc': showCellAccessory(row, col.key),
                 'cell-sel': isCellSelected(ri, col.key),
                 [`align-${colAlign(col.key)}`]: true,
               }"
-              @mousedown="onCellMouseDown(row, ri, col.key, $event)"
+              @mousedown="onCellMouseDownSelect(row, ri, col.key, $event)"
+              @click="onCellClick(row, ri, col.key, $event)"
             >
+              <input
+                v-if="isEditingCell(row, col.key)"
+                class="cell"
+                :data-col="col.key"
+                :class="{
+                  focus: isFocused(row, col.key),
+                  'cell-sel': isCellSelected(ri, col.key),
+                }"
+                :value="row[col.key as ColumnKey]"
+                @focus="setFocus(row, col.key, ri)"
+                @blur="endEdit"
+                @input="onCellInput(row, col.key as ColumnKey, ($event.target as HTMLInputElement).value)"
+              />
               <div
-                v-if="col.key === 'fileName' || isReadonlyCol(col.key)"
+                v-else
                 class="cell read"
                 :data-col="col.key"
                 :class="{
@@ -911,10 +1052,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                 }"
                 tabindex="0"
                 @focus="setFocus(row, col.key, ri)"
-                @click="
-                  setFocus(row, col.key, ri);
-                  if (col.key === 'tagFormat') openTagFormatMenu(row, $event)
-                "
               >
                 {{
                   col.key === 'tagFormat'
@@ -922,18 +1059,16 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
                     : cellValue(row, col.key)
                 }}
               </div>
-              <input
-                v-else
-                class="cell"
-                :data-col="col.key"
-                :class="{
-                  focus: isFocused(row, col.key),
-                  'cell-sel': isCellSelected(ri, col.key),
-                }"
-                :value="row[col.key as ColumnKey]"
-                @focus="setFocus(row, col.key, ri)"
-                @input="onCellInput(row, col.key as ColumnKey, ($event.target as HTMLInputElement).value)"
-              />
+              <button
+                v-if="showCellAccessory(row, col.key)"
+                type="button"
+                class="cell-acc"
+                title="Compose…"
+                @mousedown.stop
+                @click.stop="openCompose(row, col.key)"
+              >
+                …
+              </button>
             </div>
           </template>
         </div>
@@ -1204,6 +1339,28 @@ onUnmounted(() => window.removeEventListener('keydown', onPaneKeydown))
 .cell-wrap.align-center .cell,
 .head-cell.align-center {
   text-align: center;
+}
+.cell-acc {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 11px;
+  letter-spacing: -0.08em;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(48, 48, 48, 0.95);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+}
+.cell-wrap.has-acc .cell-acc {
+  opacity: 1;
 }
 .cell {
   padding: 1px 6px;

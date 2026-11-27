@@ -3,6 +3,7 @@ name = "music-tag-editor"
 version = "0.1.0"
 description = "Batch music tag editor"
 authors = ["maxencerobinet"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -26,6 +27,7 @@ serde_json = "1"
 lofty = "0.22"
 walkdir = "2"
 base64 = "0.22"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

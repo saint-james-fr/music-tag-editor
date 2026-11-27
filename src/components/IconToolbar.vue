@@ -70,6 +70,7 @@ const menus: Record<string, MenuItem[]> = {
     { id: 'compose', label: 'Compose…' },
     { id: 'assign-tracks', label: 'Assign Track Numbers…', disabled: true },
     { id: 'transliterate', label: 'Transliterate…', disabled: true },
+    { id: 'log', label: 'View Log…' },
     { id: 'prefs', label: 'Preferences…' },
   ],
   artwork: [
@@ -354,6 +355,15 @@ const onMenuPick = (itemId: string) => {
   background: rgba(255, 255, 255, 0.11);
 }
 .menu-open :deep(.glyph-wrap) {
-  background: radial-gradient(circle at 38% 32%, #7a7a7a 0%, #555 52%, #484848 100%);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(0, 0, 0, 0.22) 100%
+  );
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0.5px 0 rgba(255, 255, 255, 0.06);
 }
 </style>

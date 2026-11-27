@@ -23,7 +23,7 @@
 }
 
 .toolbar-strip {
-  min-height: var(--te-toolbar-strip-h, 51px);
+  min-height: var(--te-toolbar-strip-h, 52px);
   background: linear-gradient(
     180deg,
     #404040 0%,

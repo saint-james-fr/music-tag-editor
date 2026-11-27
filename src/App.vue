@@ -1,20 +1,64 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import EditorPane from './components/EditorPane.vue'
+import LogsModal, { type LogLine } from './components/LogsModal.vue'
 import PrefsModal from './components/PrefsModal.vue'
 import { DEMO_TRACKS, shouldLoadDemo } from './demo-tracks'
 import { useTabs } from './tabs'
 
+const LOG_CAP = 500
+
 const { tabs, activeTabId, activeTab, addTab, closeTab } = useTabs()
 const status = ref('Glissez des fichiers audio ou utilisez Open.')
+const statusIsError = ref(false)
 const showPrefs = ref(false)
+const showLogs = ref(false)
+const logs = ref<LogLine[]>([])
 const tab = computed(() => activeTab())
+
+const isErrorMsg = (msg: string) =>
+  /failed|error|err\b|exception|not allowed|pas encore/i.test(msg) || msg.includes('\n')
+
+const pushLog = (msg: string, level: LogLine['level'] = 'info') => {
+  if (!msg) return
+  logs.value.push({ t: new Date().toLocaleTimeString(), msg, level })
+  if (logs.value.length > LOG_CAP) logs.value.splice(0, logs.value.length - LOG_CAP)
+}
 
 const onStatus = (msg: string) => {
   status.value = msg
+  const err = isErrorMsg(msg)
+  statusIsError.value = err
+  pushLog(msg, err ? 'error' : 'info')
+}
+
+const clearLogs = () => {
+  logs.value = []
+}
+
+const onStatusClick = () => {
+  const sel = window.getSelection()?.toString()
+  if (sel) return
+  showLogs.value = true
+}
+
+const onWindowError = (e: ErrorEvent) => {
+  pushLog(e.message || String(e.error ?? 'Unknown error'), 'error')
+  status.value = e.message || 'Error — see log'
+  statusIsError.value = true
+}
+
+const onRejection = (e: PromiseRejectionEvent) => {
+  const reason = e.reason instanceof Error ? e.reason.message : String(e.reason)
+  pushLog(reason || 'Unhandled rejection', 'error')
+  status.value = reason || 'Error — see log'
+  statusIsError.value = true
 }
 
 onMounted(async () => {
+  window.addEventListener('error', onWindowError)
+  window.addEventListener('unhandledrejection', onRejection)
+
   if (shouldLoadDemo()) {
     const t = tab.value
     t.tracks = DEMO_TRACKS.map((r) => ({ ...r }))
@@ -27,6 +71,11 @@ onMounted(async () => {
   // (Session restore felt like stale/empty tags.)
   localStorage.removeItem('tag-editor-tabs-v1')
   status.value = 'Open a folder or drop audio files.'
+})
+
+onUnmounted(() => {
+  window.removeEventListener('error', onWindowError)
+  window.removeEventListener('unhandledrejection', onRejection)
 })
 </script>
 
@@ -53,14 +102,28 @@ onMounted(async () => {
       :tab="tab"
       @status="onStatus"
       @update:show-prefs="showPrefs = $event"
+      @update:show-logs="showLogs = $event"
     />
 
-    <footer class="status-bar">
-      <span class="status-msg">{{ status }}</span>
-      <span v-if="tab" class="status-count">{{ tab.tracks.length }}*</span>
+    <footer class="status-bar" :class="{ error: statusIsError }" title="Select text to copy · click (no selection) to open log">
+      <span
+        class="status-msg"
+        role="button"
+        tabindex="0"
+        @click="onStatusClick"
+        @keydown.enter="showLogs = true"
+      >
+        {{ status || 'Log' }}
+      </span>
     </footer>
 
     <PrefsModal :open="showPrefs" @close="showPrefs = false" />
+    <LogsModal
+      :open="showLogs"
+      :lines="logs"
+      @close="showLogs = false"
+      @clear="clearLogs"
+    />
   </div>
 </template>
 
@@ -155,16 +218,23 @@ body {
   background: var(--te-status-bg, #2a2a2a);
   border-top: 1px solid var(--te-border-subtle, #1f1f1f);
 }
+.status-bar.error {
+  color: #e8a0a0;
+  background: #3a2828;
+  border-top-color: #5a3535;
+}
 .status-msg {
+  flex: 1;
+  min-width: 0;
   opacity: 0.85;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
-.status-count {
-  color: #b0b0b0;
-  font-weight: 600;
-  font-size: 12px;
-  flex-shrink: 0;
+.status-bar.error .status-msg {
+  opacity: 1;
 }
 </style>

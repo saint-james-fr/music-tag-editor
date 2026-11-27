@@ -2,11 +2,11 @@
 
 :root {
   --te-toolbar-item-w: 46px;
-  --te-toolbar-item-h: 51px;
-  --te-toolbar-glyph: 22px;
-  --te-toolbar-icon-scale: 0.52;
+  --te-toolbar-item-h: 52px;
+  --te-toolbar-glyph: 28px;
+  --te-toolbar-icon-scale: 0.58;
   --te-toolbar-label: 10px;
-  --te-toolbar-strip-h: 51px;
+  --te-toolbar-strip-h: 52px;
 
   --te-find-h: 28px;
   --te-title-rail-h: 24px;

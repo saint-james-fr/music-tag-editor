@@ -1,4 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::imageops::FilterType;
+use image::{DynamicImage, ImageEncoder};
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
@@ -10,6 +12,10 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+/// Longest edge for embedded artwork (baseline JPEG).
+const ARTWORK_MAX_PX: u32 = 800;
+const ARTWORK_JPEG_QUALITY: u8 = 85;
 
 const AUDIO_EXT: &[&str] = &[
     "mp3", "flac", "fla", "m4a", "m4b", "m4p", "m4r", "aac", "ogg", "opus", "wav", "aif", "aiff",
@@ -43,6 +49,7 @@ struct ArtworkChange {
     path: String,
     action: String,
     data_base64: Option<String>,
+    #[allow(dead_code)] // kept for frontend payload shape; embed always re-encodes JPEG
     mime: Option<String>,
 }
 
@@ -209,13 +216,81 @@ fn fill_from_filename(row: &mut TrackRow) {
     }
 }
 
-fn read_track(path: &Path) -> Result<TrackRow, String> {
-    let tagged = Probe::open(path)
+/// lofty 0.22 wrote ID3v2.3 APIC with encoding=UTF-16 but a Latin1 empty-desc terminator.
+/// Patch those frames to Latin1 so Probe::read succeeds (image bytes stay intact).
+fn repair_broken_apic_encoding(path: &Path) -> bool {
+    let Ok(mut data) = fs::read(path) else {
+        return false;
+    };
+    if data.len() < 10 || &data[..3] != b"ID3" {
+        return false;
+    }
+    let ver = data[3];
+    let tag_size = ((data[6] as usize & 0x7f) << 21)
+        | ((data[7] as usize & 0x7f) << 14)
+        | ((data[8] as usize & 0x7f) << 7)
+        | (data[9] as usize & 0x7f);
+    let end = (10 + tag_size).min(data.len());
+    let mut i = 10usize;
+    let mut changed = false;
+    while i + 10 <= end {
+        let id = &data[i..i + 4];
+        if id.iter().all(|&b| b == 0) {
+            break;
+        }
+        let fsize = if ver == 4 {
+            ((data[i + 4] as usize & 0x7f) << 21)
+                | ((data[i + 5] as usize & 0x7f) << 14)
+                | ((data[i + 6] as usize & 0x7f) << 7)
+                | (data[i + 7] as usize & 0x7f)
+        } else {
+            ((data[i + 4] as usize) << 24)
+                | ((data[i + 5] as usize) << 16)
+                | ((data[i + 6] as usize) << 8)
+                | (data[i + 7] as usize)
+        };
+        let body = i + 10;
+        let body_end = (body + fsize).min(data.len());
+        if id == b"APIC" && body < body_end && data[body] == 1 {
+            let mut j = body + 1;
+            while j < body_end && data[j] != 0 {
+                j += 1;
+            }
+            // enc | mime\0 | pic_type | desc...
+            let desc = j + 2;
+            if desc < body_end && data[desc] == 0 {
+                let next = data.get(desc + 1).copied().unwrap_or(0);
+                let is_png = next == 0x89;
+                let is_jpeg = next == 0xFF && data.get(desc + 2) == Some(&0xD8);
+                if is_png || is_jpeg {
+                    data[body] = 0; // Latin1 matches the single-null empty description
+                    changed = true;
+                }
+            }
+        }
+        if fsize == 0 {
+            break;
+        }
+        i = body_end;
+    }
+    if changed {
+        let _ = fs::write(path, &data);
+    }
+    changed
+}
+
+fn open_tagged(path: &Path) -> Result<TaggedFile, String> {
+    repair_broken_apic_encoding(path);
+    Probe::open(path)
         .map_err(|e| e.to_string())?
         .guess_file_type()
         .map_err(|e| e.to_string())?
         .read()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+
+fn read_track(path: &Path) -> Result<TrackRow, String> {
+    let tagged = open_tagged(path)?;
 
     let tags = tagged.tags();
     let file_name = path
@@ -271,15 +346,6 @@ fn mime_from_ext(path: &Path) -> MimeType {
     }
 }
 
-fn mime_from_str(mime: &str) -> MimeType {
-    match mime {
-        "image/png" => MimeType::Png,
-        "image/gif" => MimeType::Gif,
-        "image/bmp" => MimeType::Bmp,
-        _ => MimeType::Jpeg,
-    }
-}
-
 fn ext_from_mime(mime: &MimeType) -> &str {
     match mime {
         MimeType::Png => "png",
@@ -290,12 +356,7 @@ fn ext_from_mime(mime: &MimeType) -> &str {
 }
 
 fn read_artwork_bytes(path: &Path) -> Result<ArtworkPayload, String> {
-    let tagged = Probe::open(path)
-        .map_err(|e| e.to_string())?
-        .guess_file_type()
-        .map_err(|e| e.to_string())?
-        .read()
-        .map_err(|e| e.to_string())?;
+    let tagged = open_tagged(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
     let picture = first_picture(tag).ok_or_else(|| "No embedded artwork".to_string())?;
     let mime = picture
@@ -306,6 +367,30 @@ fn read_artwork_bytes(path: &Path) -> Result<ArtworkPayload, String> {
         mime,
         data_base64: STANDARD.encode(picture.data()),
     })
+}
+
+fn prepare_embed_artwork(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let img = if img.width() > ARTWORK_MAX_PX || img.height() > ARTWORK_MAX_PX {
+        img.resize(ARTWORK_MAX_PX, ARTWORK_MAX_PX, FilterType::Lanczos3)
+    } else {
+        img
+    };
+    encode_jpeg(&img)
+}
+
+fn encode_jpeg(img: &DynamicImage) -> Result<Vec<u8>, String> {
+    let rgb = img.to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, ARTWORK_JPEG_QUALITY)
+        .write_image(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 fn apply_artwork(tag: &mut Tag, change: &ArtworkChange) -> Result<(), String> {
@@ -319,15 +404,16 @@ fn apply_artwork(tag: &mut Tag, change: &ArtworkChange) -> Result<(), String> {
         .data_base64
         .as_ref()
         .ok_or_else(|| "Missing artwork data".to_string())?;
-    let bytes = STANDARD
+    let raw = STANDARD
         .decode(data)
         .map_err(|e| e.to_string())?;
-    let mime = mime_from_str(change.mime.as_deref().unwrap_or("image/jpeg"));
+    let bytes = prepare_embed_artwork(&raw)?;
     tag.remove_picture_type(PictureType::CoverFront);
+    // ponytail: lofty 0.22 None-desc + ID3v2.3 UTF-16 writes one 0x00; Some("") encodes properly. Drop when upgrading lofty ≥0.25.
     tag.push_picture(Picture::new_unchecked(
         PictureType::CoverFront,
-        Some(mime),
-        None,
+        Some(MimeType::Jpeg),
+        Some(String::new()),
         bytes,
     ));
     Ok(())
@@ -499,12 +585,7 @@ fn write_track(
     row: Option<&TrackRow>,
     artwork: Option<&ArtworkChange>,
 ) -> Result<(), String> {
-    let mut tagged = Probe::open(path)
-        .map_err(|e| e.to_string())?
-        .guess_file_type()
-        .map_err(|e| e.to_string())?
-        .read()
-        .map_err(|e| e.to_string())?;
+    let mut tagged = open_tagged(path)?;
     {
         let tag = primary_tag_mut(&mut tagged);
         if let Some(row) = row {
@@ -789,6 +870,150 @@ mod tests {
         eprintln!("result ok={} errors={:?}", result.ok, result.errors);
         assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
         assert!(result.ok >= 5);
+    }
+
+    #[test]
+    fn apic_png_description_terminator_is_utf16() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/silent.mp3");
+        let png = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/1x1.png");
+        assert!(src.is_file() && png.is_file(), "fixtures missing");
+        let dest = Path::new("/tmp/te-apic-utf16.mp3");
+        fs::copy(&src, dest).expect("copy");
+        let png_bytes = fs::read(&png).expect("png");
+        let mut row = read_track(dest).expect("read");
+        row.tag_format = "ID3v2.3.0".into();
+        let change = ArtworkChange {
+            path: dest.display().to_string(),
+            action: "set".into(),
+            data_base64: Some(STANDARD.encode(png_bytes)),
+            mime: Some("image/png".into()),
+        };
+        write_track(dest, Some(&row), Some(&change)).expect("write artwork");
+
+        let data = fs::read(dest).expect("read back");
+        assert_eq!(&data[..3], b"ID3");
+        assert_eq!(data[3], 3, "expected ID3v2.3");
+        let tag_size = ((data[6] as usize & 0x7f) << 21)
+            | ((data[7] as usize & 0x7f) << 14)
+            | ((data[8] as usize & 0x7f) << 7)
+            | (data[9] as usize & 0x7f);
+        let mut i = 10usize;
+        let end = 10 + tag_size;
+        let mut found = false;
+        while i + 10 <= end {
+            let id = &data[i..i + 4];
+            let fsize = ((data[i + 4] as usize) << 24)
+                | ((data[i + 5] as usize) << 16)
+                | ((data[i + 6] as usize) << 8)
+                | (data[i + 7] as usize);
+            if id == b"APIC" {
+                let body = &data[i + 10..i + 10 + fsize];
+                assert_eq!(body[0], 1, "expected UTF-16 text encoding");
+                let mime_end = body[1..].iter().position(|&b| b == 0).expect("mime nul");
+                assert_eq!(&body[1..1 + mime_end], b"image/jpeg");
+                let after_mime = 1 + mime_end + 1;
+                assert_eq!(body[after_mime], 3, "picture type CoverFront");
+                let desc = &body[after_mime + 1..];
+                assert!(
+                    desc.starts_with(&[0xFF, 0xFE, 0x00, 0x00])
+                        || desc.starts_with(&[0xFE, 0xFF, 0x00, 0x00]),
+                    "bad desc prefix: {:02x?}",
+                    &desc[..desc.len().min(8)]
+                );
+                let img = &desc[4..];
+                assert_eq!(&img[..2], &[0xFF, 0xD8], "embedded art must be JPEG");
+                let decoded = image::load_from_memory(img).expect("jpeg decodes");
+                assert!(decoded.width() <= 800 && decoded.height() <= 800);
+                found = true;
+                break;
+            }
+            if fsize == 0 || id.iter().all(|&b| b == 0) {
+                break;
+            }
+            i += 10 + fsize;
+        }
+        assert!(found, "APIC frame missing");
+    }
+
+    #[test]
+    fn prepare_embed_artwork_caps_at_800_jpeg() {
+        let big = DynamicImage::new_rgb8(1600, 1200);
+        let mut png = Vec::new();
+        big.write_to(
+            &mut std::io::Cursor::new(&mut png),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        let out = prepare_embed_artwork(&png).expect("prepare");
+        assert_eq!(&out[..2], &[0xFF, 0xD8]);
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!(decoded.width(), 800);
+        assert_eq!(decoded.height(), 600);
+    }
+
+    #[test]
+    fn open_tagged_repairs_broken_apic_utf16() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/silent.mp3");
+        let png = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/1x1.png");
+        let dest = Path::new("/tmp/te-apic-broken.mp3");
+        fs::copy(&src, dest).unwrap();
+        let mut row = read_track(dest).unwrap();
+        row.tag_format = "ID3v2.3.0".into();
+        let change = ArtworkChange {
+            path: dest.display().to_string(),
+            action: "set".into(),
+            data_base64: Some(STANDARD.encode(fs::read(&png).unwrap())),
+            mime: Some("image/png".into()),
+        };
+        write_track(dest, Some(&row), Some(&change)).unwrap();
+
+        // Corrupt: UTF-16 enc + Latin1 empty-desc terminator before JPEG
+        let mut data = fs::read(dest).unwrap();
+        let tag_size = ((data[6] as usize & 0x7f) << 21)
+            | ((data[7] as usize & 0x7f) << 14)
+            | ((data[8] as usize & 0x7f) << 7)
+            | (data[9] as usize & 0x7f);
+        let mut i = 10usize;
+        let end = 10 + tag_size;
+        while i + 10 <= end {
+            let id = &data[i..i + 4];
+            let fsize = ((data[i + 4] as usize) << 24)
+                | ((data[i + 5] as usize) << 16)
+                | ((data[i + 6] as usize) << 8)
+                | (data[i + 7] as usize);
+            if id == b"APIC" {
+                let body = i + 10;
+                assert_eq!(data[body], 1);
+                let mut j = body + 1;
+                while data[j] != 0 {
+                    j += 1;
+                }
+                let desc = j + 2;
+                // proper write is BOM+null (4 bytes); smash to single 0x00 + JPEG
+                assert_eq!(&data[desc..desc + 2], &[0xFF, 0xFE]);
+                data[desc] = 0;
+                data[desc + 1] = 0xFF;
+                data[desc + 2] = 0xD8;
+                // leave rest; lofty only needs the prefix to fail
+                break;
+            }
+            i += 10 + fsize;
+        }
+        fs::write(dest, &data).unwrap();
+        assert!(
+            Probe::open(dest)
+                .unwrap()
+                .guess_file_type()
+                .unwrap()
+                .read()
+                .is_err(),
+            "corrupt APIC should fail lofty"
+        );
+        let row = open_tagged(dest).expect("repair+open");
+        assert!(
+            row.tags().iter().any(|t| !t.pictures().is_empty()),
+            "artwork readable after repair"
+        );
     }
 }
 
